@@ -364,8 +364,134 @@ Feito estes passos uma vez, as próximas entradas em cada nó será de forma dir
 necessidade de autenticação.
 
 ## Configurando os nós
+Após a instalação do SO nos nós, os comandos deverão ser executados como **super usuário
+(su)**. Para isso, será utilizado o seguinte comando
+```
+>> sudo su
+```
+Para garantir o funcionamento do cluster é necessário que a data e hora estejam equivalentes
+entre todos os nós, tanto no master quanto nos slaves. Por isso, ao ligar o equipamento, deverá
+ser digitado no terminal
+```
+>> date –set "DIA MES ANO HORA:MINUTO:SEGUNDO"
+```
+onde **MES** é a abreviado com três letras (e.g., JAN, FEV, MAR). Para conferir se as datas estão
+equivalentes basta executar o comando
+```
+>> date
+```
+
 ### Atualizando o SO
+Antes de começar a configuração dos nós, o sistema operacional deve ser atualizado. Como
+feito no servidor, será digitado no terminal
+```
+>> apt update
+>> apt upgrade -y
+```
+
 ### Configurando a placa de rede
+Será determinado um IP fixo para cada nó, para isso alguns arquivos deverão ser alterados.
+Primeiro, criar um arquivo **/etc/hostname**
+```
+noXX
+```
+onde **XX** será trocado pelo numero do no, no nosso caso, 01, 02 ou 03.
+
+O IP fixo será setado ao se escrever no arquivo **/etc/netplan/50-cloud-init.yaml**
+```
+network:
+	version:2
+	renderer:networkd
+	ethernets:
+		eth0:
+			dhcp4: true
+			addresses: [10.0.1.X/24]
+			routes:
+				- to: default
+				  via: 10.0.1.1
+			nameservers:
+				addresses: [8.8.8.8, 1.1.1.1]
+```
+onde **X** será o número relativo ao nó. Para o servidor será 5, para os nós 6, 7 e 8. Após editado
+o arquivo, deveremos aplicar as mudanças feitas através do seguinte comando
+```
+>> netplan apply
+```
+Em seguida, no arquivo **/etc/hosts** iremos adicionar as linhas
+```
+10.0.1.5 	servidor.cluster 	servidor
+10.0.1.6 	no01.cluster 		no01
+10.0.1.7 	no02.cluster 		no02
+10.0.1.8 	no03.cluster 		no03
+```
+É necessário, agora, escrever no arquivo **/etc/hosts.equiv** os nomes dos nós da rede para que
+possa ser feita a equivalência em todas as máquinas. O arquivo em questão ficaria:
+```
+servidor no01 no02 no03
+```
+
 ### Instalando e configurando o protocolo NFS
+Com o SO atualizado, será feita a instalação e configuração do protocolo NFS para os
+clientes. Desta forma os nós poderão acessar arquivos pela rede como se tratasse de arquivos
+locais.
+
+Para se instalar o NFS para o cliente será executado o comando
+```
+>> apt install nfs-common -y
+```
+A pasta compartilhada será montada no **/mnt**, assim
+```
+>> chown nobody.nogroup /mnt
+>> chmod -R 777 /mnt
+```
+Para fazer com que a pasta seja montada automaticamente quando os nós são ligados, deve-se
+alterar o arquivo **/etc/fstab**. Adiciona-se a seguinte linha
+```
+<MASTER_IP>:/mnt/nfsshare /mnt nfs defaults 0 0
+<MASTER_IP>:/home /home nfs defaults 0 0
+```
+Agora basta digitar no terminal
+```
+>> mount -a
+```
+
 ### Instalando e configurando o protocolo NIS
+Para instalar o NIS execute no terminal
+```
+>> apt install nis portmap -y
+```
+O arquivo **/etc/nsswitch.conf** deverá ser alterado adicionando nis ao final das linhas
+```
+passwd: 	files nis
+shadow: 	files nis
+group: 		files nis
+dns: 		files nis
+```
+No arquivo **/etc/yp.conf**, escreve-se
+```
+ypserver <MASTER_IP>
+```
+onde **<MASTER_IP>** é o IP do server.
+
 ### Instalando e configurando o agregador de tarefas SLURM
+Para instalar o slurm vamos executar no terminal
+```
+>> apt install slurmd slurm-cliente -y
+```
+Após instalado o slurm, iremos copiar os arquivos de configuração do master que estão presentes
+na pasta compartilhada montada em **/mnt**.
+```
+>> cp /mnt/munge.key /etc/munge/munge.key
+>> cp /mnt/slurm.conf /etc/slurm/slurm.conf
+>> cp /mnt/cgroup* /etc/slurm
+```
+Para habilitar e iniciar o Munge, executa-se no terminal
+```
+>> systemctl enable munge
+>> systemctl start munge
+```
+Finalmente podemos habilitar e iniciar o SLURM Daemon
+```
+>> systemctl enable slurmd
+>> systemctl start slurmd
+```
